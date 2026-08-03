@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Lint + Typecheck + Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --ignore-scripts --frozen-lockfile
+
+      - name: Create .env.local for build
+        run: |
+          cat > .env.local <<'EOF'
+          DATABASE_URL="postgresql://user:password@ep-placeholder.us-east-2.aws.neon.tech/placeholder?sslmode=require"
+          AUTH_SECRET="ci-build-time-placeholder-secret-32chrs"
+          AUTH_URL="http://localhost:3000"
+          AUTH_GOOGLE_ID="placeholder"
+          AUTH_GOOGLE_SECRET="placeholder"
+          RESEND_API_KEY="re_placeholder"
+          EMAIL_FROM="noreply@example.com"
+          EOF
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
