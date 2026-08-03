@@ -1,8 +1,10 @@
 import { auth } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getProjectByIdForUser } from "@/services/project.service";
+import { listTasks } from "@/services/task.service";
 import { redirect, notFound } from "next/navigation";
 import type { Route } from "next";
+import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 
 interface ProjectPageProps {
   params: Promise<{ projectId: string }>;
@@ -17,6 +19,8 @@ export default async function ProjectBoardPage({ params }: ProjectPageProps) {
   const project = await getProjectByIdForUser(db, projectId, session.user.id);
 
   if (!project) notFound();
+
+  const tasks = await listTasks(db, projectId);
 
   return (
     <div className="p-6">
@@ -33,10 +37,7 @@ export default async function ProjectBoardPage({ params }: ProjectPageProps) {
         )}
       </div>
 
-      {/* Kanban board placeholder — built in TASK 07 */}
-      <div className="border border-dashed border-[#e9ecef] rounded-xl py-20 text-center">
-        <p className="text-[#adb5bd] text-sm">Kanban board coming in TASK 07</p>
-      </div>
+      <KanbanBoard projectId={projectId} initialTasks={tasks} />
     </div>
   );
 }
