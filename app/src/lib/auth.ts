@@ -12,7 +12,7 @@ import { loginSchema } from "@/lib/validations/auth";
 function buildAuthConfig() {
   // Dynamic import of db to avoid module-evaluation-time crash on missing DATABASE_URL
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getDb } = require("@/lib/db") as { getDb: () => import("drizzle-orm/neon-http").NeonHttpDatabase };
+  const { getDb } = require("@/lib/db") as { getDb: () => import("drizzle-orm/postgres-js").PostgresJsDatabase };
   const db = getDb();
 
   return {

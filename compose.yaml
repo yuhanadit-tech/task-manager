@@ -1,0 +1,27 @@
+# Podman Compose — local development stack for Task Manager
+# Run:  podman compose up -d
+# Stop: podman compose down
+# Wipe: podman compose down -v   (removes the volume / all data)
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: taskmanager
+      POSTGRES_PASSWORD: taskmanager_dev
+      POSTGRES_DB: taskmanager_db
+    ports:
+      # Exposed only on localhost — never 0.0.0.0 (security rule §3)
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskmanager -d taskmanager_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    driver: local
