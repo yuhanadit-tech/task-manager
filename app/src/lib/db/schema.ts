@@ -4,10 +4,10 @@ import {
   varchar,
   text,
   timestamp,
+  integer,
   jsonb,
   date,
   doublePrecision,
-  integer,
   primaryKey,
   uniqueIndex,
   index,
@@ -15,20 +15,27 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
-// Shorthand for timestamp with timezone (matches PostgreSQL timestamptz)
+// Timestamp with timezone, Date mode (required by @auth/drizzle-adapter)
+const tstz = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+// Timestamp with timezone, string mode (for application-level timestamps)
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true, mode: "string" });
 
 // ---------------------------------------------------------------------------
-// users
+// users  — columns match @auth/drizzle-adapter DefaultPostgresUsersTable exactly
+// (emailVerified, image, name, email are required by the adapter)
+// Additional app columns are appended after.
 // ---------------------------------------------------------------------------
 export const users = pgTable(
   "users",
   {
+    // Auth.js required columns
     id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }),
     email: varchar("email", { length: 255 }).notNull().unique(),
-    emailVerifiedAt: timestamptz("email_verified_at"),
+    emailVerified: tstz("email_verified"),
+    image: text("image"),
+    // App-specific extra columns
     passwordHash: varchar("password_hash", { length: 255 }),
-    name: varchar("name", { length: 100 }).notNull(),
     avatarUrl: text("avatar_url"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
@@ -38,48 +45,54 @@ export const users = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// accounts  — exact shape required by @auth/drizzle-adapter
+// ---------------------------------------------------------------------------
+export const accounts = pgTable(
+  "accounts",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 50 }).notNull(),
+    provider: varchar("provider", { length: 50 }).notNull(),
+    providerAccountId: varchar("provider_account_id", { length: 255 }).notNull(),
+    refresh_token: text("refresh_token"),
+    access_token: text("access_token"),
+    expires_at: integer("expires_at"),
+    token_type: varchar("token_type", { length: 50 }),
+    scope: text("scope"),
+    id_token: text("id_token"),
+    session_state: text("session_state"),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.providerAccountId] })]
+);
+
+// ---------------------------------------------------------------------------
 // sessions  (Auth.js database adapter)
 // ---------------------------------------------------------------------------
 export const sessions = pgTable(
   "sessions",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    sessionToken: varchar("session_token", { length: 255 }).notNull().unique(),
+    sessionToken: varchar("session_token", { length: 255 }).notNull().primaryKey(),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
-    expires: timestamptz("expires").notNull(),
+      .references(() => users.id, { onDelete: "cascade" }),
+    expires: tstz("expires").notNull(),
   },
   (t) => [index("idx_sessions_user_id").on(t.userId)]
 );
 
 // ---------------------------------------------------------------------------
-// verification_tokens  (Auth.js — email verification / magic-link)
+// verification_tokens  (Auth.js)
 // ---------------------------------------------------------------------------
-export const verificationTokens = pgTable("verification_tokens", {
-  identifier: varchar("identifier", { length: 255 }).notNull(),
-  token: varchar("token", { length: 255 }).notNull().unique(),
-  expires: timestamptz("expires").notNull(),
-});
-
-// ---------------------------------------------------------------------------
-// oauth_accounts
-// ---------------------------------------------------------------------------
-export const oauthAccounts = pgTable(
-  "oauth_accounts",
+export const verificationTokens = pgTable(
+  "verification_tokens",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id),
-    provider: varchar("provider", { length: 50 }).notNull(),
-    providerAccountId: varchar("provider_account_id", { length: 255 }).notNull(),
-    accessToken: text("access_token"),
-    refreshToken: text("refresh_token"),
-    expiresAt: timestamptz("expires_at"),
-    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    identifier: varchar("identifier", { length: 255 }).notNull(),
+    token: varchar("token", { length: 255 }).notNull(),
+    expires: tstz("expires").notNull(),
   },
-  (t) => [uniqueIndex("uq_oauth_provider_account").on(t.provider, t.providerAccountId)]
+  (t) => [primaryKey({ columns: [t.identifier, t.token] })]
 );
 
 // ---------------------------------------------------------------------------
