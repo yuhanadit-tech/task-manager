@@ -8,6 +8,7 @@
 - **Primary Key:** UUID v4 (`gen_random_uuid()`) for all primary entities
 - **Timestamps:** All tables include `created_at` and `updated_at`
 - **Soft Delete:** Primary entities use `deleted_at` (nullable timestamp) instead of hard delete
+- **Auth Tables:** `sessions` and `verification_tokens` follow the Auth.js database adapter schema exactly
 
 ---
 
@@ -15,17 +16,20 @@
 
 ```
 users
+  ├── sessions (many)
   ├── project_members (many)
   ├── tasks (many, as creator)
   ├── tasks (many, as assignee)
+  ├── task_assignees (many, multi-assignee — post-MVP)
   ├── comments (many)
-  ├── activity_logs (many)
+  ├── activity_logs (many, as actor)
   └── notifications (many)
 
 projects
   ├── project_members (many)
   ├── tasks (many)
-  └── labels (many)
+  ├── labels (many)
+  └── activity_logs (many, project-level events)
 
 tasks
   ├── subtasks (many, self-referential)
@@ -59,6 +63,38 @@ Stores user account data.
 
 **Indexes:**
 - `idx_users_email` UNIQUE ON `email` WHERE `deleted_at IS NULL`
+
+---
+
+### `sessions`
+Auth.js database adapter sessions (required when using database session strategy).
+
+| Column | Type | Constraint | Description |
+|---|---|---|---|
+| `id` | `uuid` | PK, DEFAULT gen_random_uuid() | Primary key |
+| `session_token` | `varchar(255)` | NOT NULL, UNIQUE | Opaque session token sent as a cookie |
+| `user_id` | `uuid` | NOT NULL, FK → users.id | Session owner |
+| `expires` | `timestamptz` | NOT NULL | Session expiry time |
+
+**Indexes:**
+- `idx_sessions_session_token` UNIQUE ON `session_token`
+- `idx_sessions_user_id` ON `user_id`
+
+---
+
+### `verification_tokens`
+One-time tokens used by Auth.js for email verification and magic-link sign-in.
+
+| Column | Type | Constraint | Description |
+|---|---|---|---|
+| `identifier` | `varchar(255)` | NOT NULL | Email address or user identifier |
+| `token` | `varchar(255)` | NOT NULL, UNIQUE | One-time token (hashed) |
+| `expires` | `timestamptz` | NOT NULL | Token expiry time |
+
+**Constraints:**
+- PRIMARY KEY (`identifier`, `token`)
+
+> **Note:** If using JWT session strategy (stateless), these two tables are not required. Document the chosen strategy in `.env.example` via `NEXTAUTH_SESSION_STRATEGY=database|jwt`.
 
 ---
 
@@ -136,6 +172,10 @@ Invitation tokens for joining a project.
 | `accepted_at` | `timestamptz` | NULLABLE | Acceptance timestamp |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | — |
 
+**Indexes:**
+- `idx_project_invites_token` — implied by UNIQUE constraint on `token`
+- `idx_project_invites_email` ON `email` WHERE `accepted_at IS NULL` — for listing pending invites per email
+
 ---
 
 ### `tasks`
@@ -150,7 +190,7 @@ Primary entity — represents a single unit of work.
 | `description` | `jsonb` | NULLABLE | Rich text content (Tiptap JSON) |
 | `status` | `varchar(20)` | NOT NULL, DEFAULT 'backlog' | `backlog`\|`todo`\|`in_progress`\|`in_review`\|`done` |
 | `priority` | `varchar(10)` | NOT NULL, DEFAULT 'none' | `urgent`\|`high`\|`medium`\|`low`\|`none` |
-| `assignee_id` | `uuid` | NULLABLE, FK → users.id | Assigned user |
+| `assignee_id` | `uuid` | NULLABLE, FK → users.id | Primary assigned user (single-assignee MVP; see Design Notes) |
 | `creator_id` | `uuid` | NOT NULL, FK → users.id | Task creator |
 | `due_date` | `date` | NULLABLE | Deadline (date only, no time) |
 | `sort_order` | `float8` | NOT NULL, DEFAULT 0 | Order within a kanban column |
@@ -226,7 +266,7 @@ File attachments on a task.
 | `task_id` | `uuid` | NOT NULL, FK → tasks.id | Related task |
 | `uploaded_by` | `uuid` | NOT NULL, FK → users.id | Uploader |
 | `file_name` | `varchar(255)` | NOT NULL | Original file name |
-| `file_size` | `int4` | NOT NULL | File size in bytes |
+| `file_size` | `int4` | NOT NULL | File size in bytes (max enforced at API: 10 MB per file) |
 | `mime_type` | `varchar(100)` | NOT NULL | MIME type |
 | `storage_key` | `text` | NOT NULL | Path/key in object storage |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | — |
@@ -234,20 +274,27 @@ File attachments on a task.
 ---
 
 ### `activity_logs`
-Audit trail of all task changes.
+Audit trail of all task and project-level changes.
 
 | Column | Type | Constraint | Description |
 |---|---|---|---|
 | `id` | `uuid` | PK | Primary key |
-| `task_id` | `uuid` | NOT NULL, FK → tasks.id | Related task |
+| `task_id` | `uuid` | NULLABLE, FK → tasks.id | Related task (null for project-level events) |
+| `project_id` | `uuid` | NOT NULL, FK → projects.id | Related project (always set) |
+| `entity_type` | `varchar(10)` | NOT NULL | `'task'` \| `'project'` |
 | `actor_id` | `uuid` | NOT NULL, FK → users.id | User who performed the action |
-| `action` | `varchar(50)` | NOT NULL | e.g. `created`, `status_changed`, `assigned` |
+| `action` | `varchar(50)` | NOT NULL | e.g. `created`, `status_changed`, `assigned`, `member_invited`, `member_removed` |
 | `old_value` | `jsonb` | NULLABLE | Value before the change |
 | `new_value` | `jsonb` | NULLABLE | Value after the change |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | Event timestamp |
 
+**Check Constraints:**
+- `chk_activity_entity_type` CHECK (entity_type IN ('task', 'project'))
+- `chk_activity_task_ref` CHECK (entity_type = 'project' OR task_id IS NOT NULL)
+
 **Indexes:**
-- `idx_activity_logs_task_id` ON `task_id`
+- `idx_activity_logs_task_id` ON `task_id` WHERE `task_id IS NOT NULL`
+- `idx_activity_logs_project_id` ON `project_id`
 
 ---
 
@@ -258,13 +305,18 @@ In-app notifications for each user.
 |---|---|---|---|
 | `id` | `uuid` | PK | Primary key |
 | `user_id` | `uuid` | NOT NULL, FK → users.id | Notification recipient |
-| `type` | `varchar(50)` | NOT NULL | `assigned`\|`commented`\|`mentioned`\|`due_soon` |
+| `type` | `varchar(50)` | NOT NULL | `assigned`\|`commented`\|`mentioned`\|`due_soon`\|`status_changed` |
 | `payload` | `jsonb` | NOT NULL | Context data (task id, actor name, etc.) |
 | `read_at` | `timestamptz` | NULLABLE | Read timestamp (null = unread) |
+| `expires_at` | `timestamptz` | NOT NULL | Auto-cleanup threshold (DEFAULT now() + INTERVAL '90 days') |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT now() | — |
+
+**Check Constraints:**
+- `chk_notifications_type` CHECK (type IN ('assigned', 'commented', 'mentioned', 'due_soon', 'status_changed'))
 
 **Indexes:**
 - `idx_notifications_user_id` ON (`user_id`, `read_at`) WHERE `read_at IS NULL`
+- `idx_notifications_expires_at` ON `expires_at` — used by cleanup job
 
 ---
 
@@ -276,4 +328,12 @@ In-app notifications for each user.
 
 3. **Soft delete via `deleted_at`:** Preserves referential integrity and enables data recovery. All production queries must include `WHERE deleted_at IS NULL`.
 
-4. **No cascade delete:** Foreign keys without `ON DELETE CASCADE` prevent accidental data loss. Deletion must be performed explicitly from the application layer.
+4. **No cascade delete:** Foreign keys without `ON DELETE CASCADE` prevent accidental data loss. Deletion must be performed explicitly from the application layer. Soft-deleting a project must cascade soft-delete to all child tasks at the application layer.
+
+5. **Single assignee (MVP):** `tasks.assignee_id` supports one assignee. Multi-assignee requires a `task_assignees` join table (`task_id`, `user_id`, `assigned_at`) — defer to post-MVP to avoid premature schema complexity.
+
+6. **Notification TTL:** `notifications.expires_at` defaults to 90 days from creation. A scheduled cleanup job (pg_cron or application-level cron) should run weekly: `DELETE FROM notifications WHERE expires_at < now()`.
+
+7. **File upload limits:** Maximum 10 MB per file, 50 MB total per task. Enforced at the API route handler level before writing to object storage. `file_size` uses `int4` (max ~2.1 GB), sufficient for this constraint.
+
+8. **`users.name` is a single display name field.** OAuth providers return `given_name` + `family_name` separately — concatenate on import. If first/last name sorting is needed post-MVP, add `first_name` and `last_name` columns via migration and deprecate `name`.

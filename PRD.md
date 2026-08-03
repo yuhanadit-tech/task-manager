@@ -116,11 +116,12 @@ The Task Manager MVP is a team-based web application for task management. The in
 - Passwords must be hashed with bcrypt (cost factor ≥ 12)
 
 ### Non-Functional
-- **Performance:** LCP < 2.5s, FID < 100ms (Core Web Vitals "Good")
+- **Performance:** LCP < 2.5s, INP < 200ms, CLS < 0.1 (Core Web Vitals "Good" — FID was retired in March 2024)
 - **Availability:** 99.5% uptime (MVP target, hosted on Vercel)
 - **Security:** HTTPS only, CSRF protection, input sanitization, rate limiting on auth endpoints
 - **Scalability:** Database queries must use appropriate indexes, ready for 10,000 tasks per project
 - **Accessibility:** WCAG 2.1 Level AA for all main pages
+- **File uploads:** Maximum 10 MB per file, 50 MB total per task; validated at the API layer before writing to storage
 
 ### Security Requirements
 - All environment variables stored in platform secrets (never committed to git)
@@ -141,6 +142,9 @@ The Task Manager MVP is a team-based web application for task management. The in
 | Activation Rate (user creates ≥1 task) | ≥ 60% |
 
 ### Engagement
+
+> **Definition — Active User:** A registered user who performs at least one write action (create, update, or complete a task) within the measurement period.
+
 | Metric | Target |
 |---|---|
 | DAU/MAU Ratio | ≥ 20% |
@@ -154,6 +158,9 @@ The Task Manager MVP is a team-based web application for task management. The in
 | Error Rate (5xx) | < 0.1% |
 | P95 API Response Time | < 500ms |
 | Lighthouse Performance Score | ≥ 85 |
+| Core Web Vitals — LCP | < 2.5s |
+| Core Web Vitals — INP | < 200ms |
+| Core Web Vitals — CLS | < 0.1 |
 | NPS (from user survey) | ≥ 30 |
 
 ### Business
@@ -169,9 +176,9 @@ The Task Manager MVP is a team-based web application for task management. The in
 | Sprint | Duration | Deliverable |
 |---|---|---|
 | Sprint 1 | 2 weeks | Auth, Project CRUD, Database schema, CI/CD setup |
-| Sprint 2 | 2 weeks | Task CRUD, Kanban Board, Drag & Drop |
+| Sprint 2 | 2 weeks | Task CRUD, Kanban Board, Drag & Drop, notification service stub (non-blocking) |
 | Sprint 3 | 2 weeks | My Tasks, Comments, Activity Log, Labels |
-| Sprint 4 | 1 week | Email Notifications, Filter/Search, UI polish |
+| Sprint 4 | 1 week | Email Notifications wired (Resend), Filter/Search, UI polish |
 | Sprint 5 | 1 week | Testing, Bug fixes, Performance optimization, Soft launch |
 
 **Total estimate: 8 weeks (2 months)**

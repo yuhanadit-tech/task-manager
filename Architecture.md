@@ -11,9 +11,10 @@ The Task Manager MVP uses a **Modular Monolith** architecture (a single deployab
 | Layer | Technology | Version (min) | Reason |
 |---|---|---|---|
 | Frontend | Next.js (App Router) | 15.x | Built-in SSR/SSG, file-based routing, React Server Components |
-| Styling | Tailwind CSS | 3.x | Utility-first, rapid prototyping, consistent design tokens |
+| Styling | Tailwind CSS | 4.x | Utility-first, rapid prototyping, CSS-first config, native CSS variables |
 | UI Components | shadcn/ui | latest | Accessible, unstyled-by-default, built on Radix UI |
 | State Management | Zustand | 5.x | Lightweight, no boilerplate, selector pattern |
+| Server State | TanStack Query (React Query) | 5.x | Caching, background refetch, stale-while-revalidate for API data |
 | Backend | Next.js API Routes (Route Handlers) | 15.x | Collocated with frontend, avoids the overhead of a separate service in MVP |
 | ORM | Drizzle ORM | 0.x | Type-safe, schema-first, file-based migrations, performance close to raw SQL |
 | Database | PostgreSQL | 16.x | ACID compliant, JSON support, mature ecosystem |
@@ -95,8 +96,64 @@ task-manager/
 ├── tailwind.config.ts
 ├── .env.local                        # NOT committed to git
 ├── .env.example                      # Env variable template (committed)
+├── .gitignore
 └── package.json
 ```
+
+---
+
+## Environment Variables
+
+The following variables must be defined in `.env.local` (never committed). Use `.env.example` as the template.
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string (e.g. `postgresql://user:pass@host/db`) |
+| `NEXTAUTH_SECRET` | ✅ | Random 32-byte secret for signing sessions/JWTs (`openssl rand -base64 32`) |
+| `NEXTAUTH_URL` | ✅ | Canonical app URL (e.g. `http://localhost:3000` in dev, full URL in prod) |
+| `GOOGLE_CLIENT_ID` | ✅ | Google OAuth app client ID |
+| `GOOGLE_CLIENT_SECRET` | ✅ | Google OAuth app client secret |
+| `RESEND_API_KEY` | ✅ | Resend email API key |
+| `RESEND_FROM_EMAIL` | ✅ | Verified sender address (e.g. `noreply@yourdomain.com`) |
+| `BLOB_READ_WRITE_TOKEN` | ⬜ | Vercel Blob token (required only if file attachments enabled) |
+| `NEXTAUTH_SESSION_STRATEGY` | ⬜ | `database` or `jwt` (default: `database`) |
+
+---
+
+## CI/CD Pipeline
+
+### Tooling
+- **CI:** GitHub Actions
+- **Deployment:** Vercel (automatic preview on PR, production on `main` merge)
+- **Database migrations:** Drizzle Kit (`drizzle-kit migrate`) run as part of the deploy script
+
+### GitHub Actions Jobs (per PR)
+
+```
+on: pull_request
+jobs:
+  quality:
+    steps:
+      - Checkout
+      - Install dependencies (pnpm install --frozen-lockfile)
+      - Type check (tsc --noEmit)
+      - Lint (eslint .)
+      - Format check (prettier --check .)
+      - Unit tests (vitest run)
+```
+
+### Deployment Pipeline
+
+```
+Merge to main
+  → Vercel Build triggered
+  → pnpm build (Next.js)
+  → drizzle-kit migrate (runs pending migrations against production DB)
+  → Deploy to Vercel Edge Network
+  → Smoke test URL health check
+```
+
+> **Preview deployments:** Every PR gets a Vercel preview URL. Previews connect to a Neon database branch (branched from main), so migrations can be tested safely before merging.
 
 ---
 
@@ -122,12 +179,14 @@ Client (TaskForm)
      → task.service.ts: createTask()
        → Drizzle INSERT into tasks table
        → Drizzle INSERT into activity_logs
-       → notification.service.ts: notifyAssignees()
+       → void notification.service.ts.notifyAssignees()  ← fire-and-forget (non-blocking)
           → Resend API (email)
-     → Return created task (JSON)
+     → Return created task (JSON)   ← does NOT wait for email
   → Zustand update: replace optimistic entry with real data
   → UI reflects final state
 ```
+
+> **Note:** Email sending is fire-and-forget (`void notifyAssignees()`). The API response does not wait for Resend to confirm delivery. This avoids Vercel's 10s serverless timeout being consumed by external API latency. Email failures are logged server-side but do not surface as errors to the user.
 
 ### 3. Kanban Board Update (Drag & Drop)
 

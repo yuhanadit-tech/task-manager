@@ -90,7 +90,7 @@ Bell icon (navbar) → Notification dropdown
 --color-info:          #0891b2;
 
 /* Priority */
---color-priority-urgent: #dc2626;
+--color-priority-urgent: #be123c;  /* rose-700 — distinct from --color-danger */
 --color-priority-high:   #ea580c;
 --color-priority-medium: #ca8a04;
 --color-priority-low:    #16a34a;
@@ -148,6 +148,37 @@ Uses Tailwind default spacing (4px base unit):
 --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07);
 --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08);
 ```
+
+---
+
+## Empty & Error States
+
+### Empty States
+
+| Scenario | Component | Headline | CTA |
+|---|---|---|---|
+| New project, no tasks | `EmptyState` (centered, full board) | "No tasks yet" | "Create your first task" button |
+| Filter returns no results | `EmptyState` (inline, within board) | "No tasks match your filters" | "Clear filters" link |
+| My Tasks — nothing assigned | `EmptyState` | "You have no tasks assigned" | "Browse projects" link |
+| Notification list empty | `EmptyState` (small) | "You're all caught up" | — |
+
+> When all columns are empty on first load, display a single full-width `EmptyState` centered across the board area rather than 5 empty columns. This reduces visual noise and improves the perceived onboarding experience.
+
+### Error States
+
+All components that fetch or mutate data must handle the following states consistently:
+
+| State | Visual Treatment |
+|---|---|
+| Loading | `Skeleton` placeholder matching component shape |
+| Fetch error | Inline `ErrorMessage` with "Something went wrong. Try again." + retry button |
+| Mutation error (e.g. save failed) | Toast notification (top-right, auto-dismiss 4s) with error message |
+| Network offline | Persistent banner at top of page: "You appear to be offline. Changes will sync when reconnected." |
+
+**Standard components:**
+- `ErrorMessage` — inline error block with icon + message + optional retry action
+- `Toast` — ephemeral notification for mutation feedback (success and error)
+- Every route group must have an `error.tsx` (Next.js App Router error boundary) that renders a generic "Something went wrong" page and logs the error server-side. Client Components with risky operations must be wrapped in a React `ErrorBoundary`.
 
 ---
 

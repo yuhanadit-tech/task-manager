@@ -153,6 +153,98 @@ const { id, title, status } = await db
 
 ---
 
+## Error Handling Convention
+
+### Next.js Error Boundaries
+
+Every route group in the App Router **must** have an `error.tsx` file:
+
+```tsx
+// app/(dashboard)/error.tsx
+"use client";
+
+import { useEffect } from "react";
+import { logger } from "@/lib/logger";
+
+export default function DashboardError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Log server-side only — never expose stack trace to UI
+    logger.error("Dashboard render error", { digest: error.digest });
+  }, [error]);
+
+  return (
+    <div>
+      <h2>Something went wrong</h2>
+      <button onClick={reset}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Client Component Error Boundaries
+
+Client Components with risky async operations (data fetching, file uploads) must be wrapped in a React `ErrorBoundary`. Use the `react-error-boundary` package:
+
+```tsx
+import { ErrorBoundary } from "react-error-boundary";
+
+<ErrorBoundary fallback={<ErrorMessage message="Failed to load tasks" />}>
+  <KanbanBoard projectId={projectId} />
+</ErrorBoundary>
+```
+
+### Rules
+- ❌ **Never** return raw `error.message` or `error.stack` in API responses — use generic messages
+- ✅ Log the full error server-side with a correlation ID (`error.digest` in Next.js)
+- ✅ Mutations (POST/PATCH/DELETE) that fail must respond with `{ data: null, error: "..." }` and an appropriate HTTP status code
+- ✅ The UI must show a user-facing toast or inline `ErrorMessage` for every failed mutation
+
+---
+
+## Testing Strategy
+
+### Framework
+- **Unit / Integration tests:** Vitest + `@testing-library/react`
+- **Test runner config:** `vitest.config.ts` at project root
+
+### What to Test
+
+| Layer | Required | Notes |
+|---|---|---|
+| `services/` | ✅ Required | All exported functions must have unit tests with mocked DB |
+| API Route Handlers | ✅ Required | Happy path + auth failure + validation failure per route |
+| Zod schemas (`lib/validations/`) | ✅ Required | Valid and invalid inputs |
+| Shared UI components | ⬜ Optional | Snapshot tests for `Badge`, `Avatar`, `StatusBadge`, etc. |
+| Page components | ⬜ Optional | Integration tests for critical flows (task creation, drag-and-drop) |
+
+### Coverage Threshold
+
+```json
+// vitest.config.ts
+coverage: {
+  thresholds: {
+    "src/services/**": { lines: 80, functions: 80 },
+    "src/app/api/**": { lines: 70 }
+  }
+}
+```
+
+### Naming Convention
+
+```
+src/services/__tests__/task.service.test.ts
+src/app/api/tasks/__tests__/route.test.ts
+src/components/task/__tests__/TaskCard.test.tsx
+```
+
+---
+
 ## Style Guide
 
 ### Formatting
